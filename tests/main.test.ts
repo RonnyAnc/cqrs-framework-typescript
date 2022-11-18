@@ -1,42 +1,67 @@
-import { Delays, greeter } from '../src/main'
+import { Container, injectable } from 'inversify'
+import 'reflect-metadata'
 
-describe('greeter function', () => {
-    const name = 'John'
-    let hello: string
+describe('Mediator', () => {
+    it('should resolve request handler for a certain request', async () => {
+        const myContainer = new Container()
+        myContainer
+            .bind<RequestHandler<TestRequest>>(TYPES.TestRequestHandler)
+            .to(TestRequestHandler)
+            .inSingletonScope()
+        const mediator = new Mediator(myContainer)
 
-    let timeoutSpy: jest.SpyInstance
+        await mediator.Handle(new TestRequest())
 
-    // Act before assertions
-    beforeAll(async () => {
-        // Read more about fake timers
-        // http://facebook.github.io/jest/docs/en/timer-mocks.html#content
-        // Jest 27 now uses "modern" implementation of fake timers
-        // https://jestjs.io/blog/2021/05/25/jest-27#flipping-defaults
-        // https://github.com/facebook/jest/pull/5171
-        jest.useFakeTimers()
-        timeoutSpy = jest.spyOn(global, 'setTimeout')
-
-        const p: Promise<string> = greeter(name)
-        jest.runOnlyPendingTimers()
-        hello = await p
+        const testHandler = myContainer.get<RequestHandler<TestRequest>>(
+            TYPES.TestRequestHandler
+        ) as TestRequestHandler
+        expect(testHandler.hasBeenCalledWithTestRequest).toBeTruthy()
     })
 
-    // Teardown (cleanup) after assertions
-    afterAll(() => {
-        timeoutSpy.mockRestore()
-    })
+    class Mediator {
+        constructor(private container: Container) {}
 
-    // Assert if setTimeout was called properly
-    it('delays the greeting by 2 seconds', () => {
-        expect(setTimeout).toHaveBeenCalledTimes(1)
-        expect(setTimeout).toHaveBeenLastCalledWith(
-            expect.any(Function),
-            Delays.Long
-        )
-    })
+        public async Handle<T extends Request>(request: T): Promise<void> {
+            const handler = this.container.get<RequestHandler<T>>(
+                TYPES[`${request.name}Handler`]
+            )
+            await handler.Handle(request)
+            return Promise.resolve()
+        }
+    }
 
-    // Assert greeter result
-    it('greets a user with `Hello, {name}` message', () => {
-        expect(hello).toBe(`Hello, ${name}`)
-    })
+    // eslint-disable-next-line @typescript-eslint/no-empty-interface
+    interface Request {
+        get name(): string
+    }
+
+    class TestRequest implements Request {
+        get name(): string {
+            return 'TestRequest'
+        }
+    }
+
+    interface RequestHandler<T extends Request> {
+        get name(): string
+        Handle(request: T): Promise<void>
+    }
+
+    @injectable()
+    class TestRequestHandler implements RequestHandler<TestRequest> {
+        get name(): string {
+            return TestRequestHandler.name
+        }
+        public hasBeenCalledWithTestRequest = false
+
+        Handle(request: TestRequest): Promise<void> {
+            if (request instanceof TestRequest) {
+                this.hasBeenCalledWithTestRequest = true
+            }
+            return Promise.resolve()
+        }
+    }
+
+    const TYPES = {
+        TestRequestHandler: 'TestRequestHandler'
+    }
 })
